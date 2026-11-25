@@ -1,0 +1,17 @@
+# Actions: result, conversion of texts from variables, error, panic, type error.
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}
+← {"id":1,"jsonrpc":"2.0","result":{"concurrency":4,"encoding":"json","name":"golden","protocolVersion":1,"version":"1.0.0"}}
+→ {"jsonrpc":"2.0","id":2,"method":"action.execute","params":{"type":"golden.echo","config":{"text":"ab","times":"2","server":{"name":"srv","type":"golden","host":"example.org","password":"x"}},"context":{"runId":"01RUN","actionId":"echo","projectDir":"D:\\flows","environment":"prod"}}}
+← {"id":2,"jsonrpc":"2.0","result":{"output":{"host":"example.org","run":"01RUN","text":"abab"}}}
+→ {"jsonrpc":"2.0","id":3,"method":"action.execute","params":{"type":"golden.echo","config":{"text":"fail"},"context":{"runId":"01RUN","actionId":"echo"}}}
+← {"error":{"code":-32000,"message":"cannot echo"},"id":3,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":4,"method":"action.execute","params":{"type":"golden.echo","config":{"text":"panic"},"context":{"runId":"01RUN","actionId":"echo"}}}
+← {"error":{"code":-32000,"message":"internal error of the plugin in golden.echo: boom"},"id":4,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":5,"method":"action.execute","params":{"type":"golden.echo","config":{"text":"a","times":"many"},"context":{"runId":"01RUN","actionId":"echo"}}}
+← {"error":{"code":-32000,"message":"field \"times\": expected a whole number, got string"},"id":5,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":6,"method":"connection.test","params":{"type":"golden","connection":{"name":"srv","type":"golden","host":"example.org"}}}
+← {"id":6,"jsonrpc":"2.0","result":{"ok":true,"message":"connected to example.org","version":"golden 1"}}
+→ {"jsonrpc":"2.0","id":7,"method":"connection.test","params":{"type":"golden","connection":{"name":"srv","type":"golden","host":"down"}}}
+← {"id":7,"jsonrpc":"2.0","result":{"ok":false,"message":"cannot reach down"}}
+→ {"jsonrpc":"2.0","id":8,"method":"shutdown","params":{}}
+← {"id":8,"jsonrpc":"2.0","result":null}

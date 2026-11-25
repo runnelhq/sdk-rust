@@ -1,0 +1,10 @@
+kind: Plugin
+apiVersion: runnel/v1
+name: hello
+version: 1.0.0
+description: Example plugin of the Rust SDK
+namespace: hello
+executable:
+  windows: bin/hello.exe
+  linux: bin/hello
+  darwin: bin/hello

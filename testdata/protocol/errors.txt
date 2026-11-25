@@ -1,0 +1,20 @@
+# Answers to mistakes of the host: before initialize, invalid JSON, unknown method,
+# unknown type, invalid parameters, a notification without known method.
+→ {"jsonrpc":"2.0","id":1,"method":"describe","params":{}}
+← {"error":{"code":-32002,"message":"initialize first"},"id":1,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":1}}
+← {"id":2,"jsonrpc":"2.0","result":{"concurrency":4,"encoding":"json","name":"golden","protocolVersion":1,"version":"1.0.0"}}
+→ not json
+← {"error":{"code":-32700,"message":"invalid JSON"},"id":null,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","method":"$/unknown","params":{}}
+→ {"jsonrpc":"2.0","id":3,"method":"golden.unknown","params":{}}
+← {"error":{"code":-32601,"message":"method \"golden.unknown\" not found"},"id":3,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":4,"method":"action.execute","params":{"type":"golden.none","config":{}}}
+← {"error":{"code":-32602,"message":"unknown action type \"golden.none\""},"id":4,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":5,"method":"action.execute","params":"nonsense"}
+← {"error":{"code":-32602,"message":"invalid parameters of action.execute"},"id":5,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":8,"method":"connection.test","params":{"type":"golden.none","connection":{}}}
+← {"error":{"code":-32601,"message":"connection type \"golden.none\" has no test"},"id":8,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":99}}
+→ {"jsonrpc":"2.0","id":9,"method":"shutdown","params":{}}
+← {"id":9,"jsonrpc":"2.0","result":null}
