@@ -15,6 +15,7 @@
 //! run; tests of required fields belong into tests against Runnel itself ([`Project`]).
 
 mod project;
+mod stream;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -30,6 +31,7 @@ use serde_json::{Value as Json, json};
 use crate::{Plugin, TestResult};
 
 pub use project::{Project, RUNNEL_ENV};
+pub use stream::{EMIT_WINDOW, Emitted, StreamResult};
 
 /// How long the client waits for an answer.
 pub const TIMEOUT: Duration = Duration::from_secs(10);
@@ -75,6 +77,7 @@ pub(crate) struct Shared {
     pub(crate) violations: Vec<String>,
     /// Error answers without id, e.g. to a line that is not JSON.
     pub(crate) stray_errors: Vec<RpcError>,
+    pub(crate) streams: HashMap<u64, mpsc::Sender<stream::Event>>,
     pub(crate) ended: bool,
 }
 
@@ -85,6 +88,7 @@ pub struct Client {
     input: Mutex<Option<std::io::PipeWriter>>,
     pub(crate) shared: Arc<Mutex<Shared>>,
     next_id: Mutex<u64>,
+    next_stream: Mutex<u64>,
     serve: Option<JoinHandle<std::io::Result<()>>>,
     readers: Vec<JoinHandle<()>>,
     /// The answer to initialize.
@@ -129,6 +133,7 @@ impl Client {
             log: Vec::new(),
             violations: Vec::new(),
             stray_errors: Vec::new(),
+            streams: HashMap::new(),
             ended: false,
         }));
         let plugin = p.clone();
@@ -146,6 +151,7 @@ impl Client {
             input: Mutex::new(Some(in_w)),
             shared,
             next_id: Mutex::new(0),
+            next_stream: Mutex::new(0),
             serve: Some(serve),
             readers: vec![log_reader, answers],
             initialized: Initialized::default(),
@@ -173,6 +179,12 @@ impl Client {
         if let Some(w) = self.input.lock().unwrap().as_mut() {
             let _ = w.write_all(format!("{line}\n").as_bytes());
         }
+    }
+
+    pub(crate) fn next_stream_id(&self) -> u64 {
+        let mut n = self.next_stream.lock().unwrap();
+        *n += 1;
+        *n
     }
 
     /// Sends a request and returns it without waiting for the answer.
@@ -337,14 +349,7 @@ fn read_answers(out: std::io::PipeReader, shared: &Mutex<Shared>) {
                     .violations
                     .push(format!("answer with unknown id: {text}"));
             }
-            None => {
-                let method = m.get("method").and_then(Json::as_str).unwrap_or_default();
-                shared
-                    .lock()
-                    .unwrap()
-                    .violations
-                    .push(format!("unexpected notification {method}"));
-            }
+            None => stream::notification(shared, &m),
         }
     }
     let mut s = shared.lock().unwrap();
@@ -352,4 +357,5 @@ fn read_answers(out: std::io::PipeReader, shared: &Mutex<Shared>) {
     for (_, tx) in s.waiting.drain() {
         let _ = tx.send(Err(client_error("the plugin ended")));
     }
+    s.streams.clear();
 }

@@ -13,6 +13,8 @@
 ← {"error":{"code":-32602,"message":"unknown action type \"golden.none\""},"id":4,"jsonrpc":"2.0"}
 → {"jsonrpc":"2.0","id":5,"method":"action.execute","params":"nonsense"}
 ← {"error":{"code":-32602,"message":"invalid parameters of action.execute"},"id":5,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":6,"method":"transform.open","params":{"stream":1,"type":"golden.none","config":{}}}
+← {"error":{"code":-32602,"message":"unknown transform type \"golden.none\""},"id":6,"jsonrpc":"2.0"}
 → {"jsonrpc":"2.0","id":8,"method":"connection.test","params":{"type":"golden.none","connection":{}}}
 ← {"error":{"code":-32601,"message":"connection type \"golden.none\" has no test"},"id":8,"jsonrpc":"2.0"}
 → {"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":99}}

@@ -66,9 +66,18 @@ impl Plugin {
         });
         let result = read_lines(input, |line| srv.handle(line));
         // The host is gone or broke the protocol: whatever still runs is cancelled.
-        let cancels: Vec<Cancel> = srv.lock().running.values().cloned().collect();
+        let (cancels, streams): (Vec<Cancel>, Vec<_>) = {
+            let st = srv.lock();
+            (
+                st.running.values().cloned().collect(),
+                st.streams.values().cloned().collect(),
+            )
+        };
         for c in cancels {
             c.cancel();
+        }
+        for s in streams {
+            s.cancel();
         }
         srv.tasks.wait();
         result
@@ -117,6 +126,7 @@ pub(crate) struct Server {
 pub(crate) struct State {
     initialized: bool,
     running: HashMap<String, Cancel>,
+    pub(crate) streams: HashMap<u64, Arc<crate::transform::Shared>>,
 }
 
 #[derive(Deserialize)]
@@ -147,6 +157,13 @@ struct Failure<'a> {
 struct RpcError {
     code: i64,
     message: String,
+}
+
+#[derive(Serialize)]
+pub(crate) struct Notification<T: Serialize> {
+    pub(crate) jsonrpc: &'static str,
+    pub(crate) method: &'static str,
+    pub(crate) params: T,
 }
 
 fn null_id() -> &'static RawValue {
@@ -184,7 +201,18 @@ impl Server {
         let _ = out.flush();
     }
 
-    fn reply<T: Serialize>(&self, id: &RawValue, result: T) {
+    pub(crate) fn notify<T: Serialize>(&self, method: &'static str, params: T) {
+        match serde_json::to_vec(&Notification {
+            jsonrpc: "2.0",
+            method,
+            params,
+        }) {
+            Ok(data) => self.send_raw(&data),
+            Err(e) => self.log.error(format_args!("cannot encode {method}: {e}")),
+        }
+    }
+
+    pub(crate) fn reply<T: Serialize>(&self, id: &RawValue, result: T) {
         let data = match serde_json::to_vec(&Reply {
             jsonrpc: "2.0",
             id,
@@ -258,7 +286,11 @@ impl Server {
             "action.execute" => self.execute(id, m.params),
             "connection.test" => self.test_connection(id, m.params),
             "shutdown" => self.reply(id, Json::Null),
-            _ => self.fail(Some(id), code::METHOD_NOT_FOUND, format!("method {method:?} not found")),
+            _ => {
+                if !self.request(&method, id, m.params) {
+                    self.fail(Some(id), code::METHOD_NOT_FOUND, format!("method {method:?} not found"));
+                }
+            }
         }
     }
 
@@ -276,8 +308,9 @@ impl Server {
             if let Some(c) = self.lock().running.get(&key) {
                 c.cancel();
             }
+            return;
         }
-        // unknown notifications are ignored
+        self.stream_notification(method, params);
     }
 
     fn initialize(&self, id: &RawValue) {
@@ -307,6 +340,7 @@ impl Server {
         let mut result = serde_json::Map::new();
         let actions: Vec<_> = self.p.actions.iter().map(|a| &a.descriptor).collect();
         result.insert("actions".into(), serde_json::to_value(actions).unwrap_or_default());
+        self.describe_transforms(&mut result);
         if !self.p.connections.is_empty() {
             let conns: Vec<_> = self.p.connections.iter().map(|c| &c.descriptor).collect();
             result.insert(
