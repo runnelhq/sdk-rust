@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1" # weekly: fuzzing, new vulnerabilities and new versions of Runnel
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain (rust-toolchain.toml) and Windows target
+        run: rustup show && rustup target add x86_64-pc-windows-msvc
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy (Linux)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (Windows code)
+        run: cargo clippy --workspace --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - name: Test
+        run: cargo test --workspace --all-targets
+      - name: Doc tests
+        run: cargo test --workspace --doc
+
+  runnel:
+    name: Test against Runnel (main, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: runnelhq/runnel
+          path: runnel
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: runnel/go.mod
+          check-latest: true
+      - name: Build Runnel (without editor)
+        run: cd runnel && go build -o "bin/runnel$(go env GOEXE)" ./cmd/runnel
+      - run: rustup show
+      - name: Test the example plugin in Runnel
+        run: |
+          bin="$PWD/runnel/bin/runnel$(go env GOEXE)"
+          # On Windows, the tests need a Windows path, not the one of Git Bash.
+          if command -v cygpath >/dev/null; then bin="$(cygpath -m "$bin")"; fi
+          RUNNEL_BIN="$bin" cargo test --workspace --all-targets with_runnel -- --nocapture
+
+  deny:
+    name: Licenses and vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  fuzz:
+    name: Fuzz (weekly)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup show
+      - name: Protocol loop with random messages
+        run: make fuzz FUZZ_ITERATIONS=2000000

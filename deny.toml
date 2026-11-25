@@ -1,0 +1,22 @@
+# cargo deny check: licenses of all dependencies (MIT-compatible, ADR 0004 of Runnel),
+# known vulnerabilities and sources. Plugins built with the SDK inherit its dependencies.
+[graph]
+all-features = true
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib"]
+confidence-threshold = 0.9
+# The list is the one of Runnel; not every license occurs here.
+unused-allowed-license = "allow"
+
+[advisories]
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
