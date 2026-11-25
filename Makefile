@@ -1,10 +1,10 @@
-# Rust-SDK für Runnel-Plugins. Ziele: make test | lint | fmt | fuzz | deny | golden | runnel-test
+# Rust-SDK für Runnel-Plugins. Ziele: make test | lint | fmt | fuzz | bench | deny | golden | runnel-test
 FUZZ_ITERATIONS ?= 20000
 # Runnel für die Tests gegen den Host, z. B. RUNNEL_BIN=../runnel/bin/runnel
 RUNNEL_BIN      ?=
 WINDOWS_TARGET  := x86_64-pc-windows-msvc
 
-.PHONY: test lint fmt fuzz deny golden runnel-test
+.PHONY: test lint fmt fuzz bench deny golden runnel-test
 
 ## test: alle Tests (Tests gegen Runnel nur mit RUNNEL_BIN)
 test:
@@ -24,6 +24,10 @@ fmt:
 ## fuzz: Protokoll-Schleife mit zufällig veränderten Nachrichten (FUZZ_ITERATIONS Läufe)
 fuzz:
 	RUNNEL_FUZZ_ITERATIONS=$(FUZZ_ITERATIONS) cargo test --release --test fuzz
+
+## bench: Durchsatz eines Transforms über das Protokoll (ohne Runnel)
+bench:
+	cargo test --release --test bench -- --ignored --nocapture
 
 ## deny: Lizenzen, Schwachstellen und Quellen der Abhängigkeiten (cargo-deny)
 deny:

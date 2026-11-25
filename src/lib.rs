@@ -38,6 +38,8 @@ mod log;
 pub mod schema;
 mod serve;
 pub mod testing;
+mod transform;
+mod value;
 
 use std::sync::Arc;
 
@@ -49,6 +51,8 @@ pub use cancel::Cancel;
 pub use log::Logger;
 pub use schema::ConfigSchema;
 pub use serve::MAX_MESSAGE_SIZE;
+pub use transform::{Batch, STREAM_WINDOW, Stream, TO_ERROR, TO_MAIN, Transform, transform_category};
+pub use value::{Field, Row, Value, error_fields, error_row, field_index, types};
 
 /// Derives [`Config`] for a struct with named fields; see there.
 pub use runnel_plugin_derive::Config;
@@ -382,6 +386,7 @@ pub struct Plugin {
     concurrency: usize,
     pub(crate) actions: Vec<ActionEntry>,
     pub(crate) connections: Vec<ConnectionEntry>,
+    pub(crate) transforms: Vec<transform::TransformEntry>,
 }
 
 fn is_name(s: &str) -> bool {
@@ -411,6 +416,7 @@ impl Plugin {
             concurrency: DEFAULT_CONCURRENCY,
             actions: Vec::new(),
             connections: Vec::new(),
+            transforms: Vec::new(),
         }
     }
 
