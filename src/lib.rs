@@ -51,7 +51,10 @@ pub use cancel::Cancel;
 pub use log::Logger;
 pub use schema::ConfigSchema;
 pub use serve::MAX_MESSAGE_SIZE;
-pub use transform::{Batch, STREAM_WINDOW, Stream, TO_ERROR, TO_MAIN, Transform, transform_category};
+pub use transform::{
+    Batch, DetectedField, Detection, Fact, InitInput, InitResult, Problem, RecordSchema, STREAM_WINDOW, Stream,
+    TO_ERROR, TO_MAIN, Transform, transform_category,
+};
 pub use value::{Field, Row, Value, error_fields, error_row, field_index, types};
 
 /// Derives [`Config`] for a struct with named fields; see there.

@@ -4,8 +4,8 @@
 #![allow(dead_code)]
 
 use runnel_plugin::{
-    Action, Config, ConnectionInfo, ConnectionType, Plugin, TO_ERROR, TO_MAIN, TestResult, Transform, Value,
-    error_fields, error_row, field_index,
+    Action, Config, ConnectionInfo, ConnectionType, DetectedField, Detection, InitResult, Plugin, Problem, TO_ERROR,
+    TO_MAIN, TestResult, Transform, Value, error_fields, error_row, field_index,
 };
 use serde::Deserialize;
 
@@ -92,7 +92,33 @@ pub fn golden() -> Plugin {
             },
         )
         .record_errors()
-        .parallel(),
+        .parallel()
+        .init(|_ctx, input, c: GoldenFields| {
+            let mut res = InitResult {
+                output: Some(input.input.clone()),
+                problems: Vec::new(),
+            };
+            if !input.input.open && field_index(&input.input.fields, &c.field).is_none() {
+                res.problems.push(Problem::error(
+                    "field",
+                    format!("field {:?} is not in the input", c.field),
+                ));
+            }
+            res
+        })
+        .detect_fields(|_ctx, _c: GoldenFields, _limit| {
+            Ok(Detection {
+                rows: 1,
+                complete: true,
+                fields: vec![DetectedField {
+                    name: "name".into(),
+                    type_: "string".into(),
+                    values: vec!["anna".into()],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            })
+        }),
     );
     p.connection_type(
         ConnectionType::new("golden", "Golden", "A test service").test(|_ctx, c: GoldenConn| {

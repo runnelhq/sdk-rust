@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use serde_json::{Map, Value as Json, json};
 
 use super::{Client, RpcError, Shared, TIMEOUT, client_error};
-use crate::transform::Batch;
+use crate::transform::{Batch, Detection, InitInput, InitResult};
 use crate::value::Field;
 
 /// The number of transform.emit the client takes before it acknowledges them, like Runnel.
@@ -195,5 +195,24 @@ impl Client {
                 }
             }
         }
+    }
+
+    /// Calls transform.init with the configuration (as Runnel sends it for checks) and the
+    /// input schema.
+    pub fn init(&self, type_: &str, config: Json, input: &InitInput) -> Result<InitResult, RpcError> {
+        let r = self.call(
+            "transform.init",
+            json!({"type": type_, "config": config, "input": input.input, "targets": input.targets}),
+        )?;
+        serde_json::from_value(r).map_err(|e| client_error(format!("invalid answer to transform.init: {e}")))
+    }
+
+    /// Calls transform.detectFields.
+    pub fn detect_fields(&self, type_: &str, config: Json, limit: usize) -> Result<Detection, RpcError> {
+        let r = self.call(
+            "transform.detectFields",
+            json!({"type": type_, "config": config, "limit": limit}),
+        )?;
+        serde_json::from_value(r).map_err(|e| client_error(format!("invalid answer to transform.detectFields: {e}")))
     }
 }
