@@ -19,6 +19,20 @@ pub(crate) fn decode<C: DeserializeOwned>(
     serde_json::from_value(v).map_err(|e| format!("invalid configuration: {}", strip_position(&e.to_string())).into())
 }
 
+/// Decodes the configuration for transform.init, where values may still be `${…}`: fields
+/// whose values do not fit are left out, so that they get their default.
+pub(crate) fn decode_lenient<C: DeserializeOwned>(
+    raw: Option<&serde_json::value::RawValue>,
+    s: &ConfigSchema,
+) -> Result<C, Error> {
+    let mut v = parse(raw)?;
+    coerce(s, &mut v);
+    if let Json::Object(m) = &mut v {
+        m.retain(|k, item| s.property(k).is_none_or(|ps| check(ps, item, k).is_ok()));
+    }
+    serde_json::from_value(v).map_err(|e| format!("invalid configuration: {}", strip_position(&e.to_string())).into())
+}
+
 fn parse(raw: Option<&serde_json::value::RawValue>) -> Result<Json, Error> {
     let text = raw.map(|r| r.get()).unwrap_or("null");
     let v: Json = serde_json::from_str(text).map_err(|e| format!("invalid configuration: {e}"))?;

@@ -1,5 +1,5 @@
 use runnel_plugin::testing::{Client, Project};
-use runnel_plugin::{Batch, Field, TO_ERROR, TO_MAIN, Value, types};
+use runnel_plugin::{Batch, Field, InitInput, RecordSchema, TO_ERROR, TO_MAIN, Value, types};
 use serde_json::json;
 
 #[test]
@@ -30,6 +30,21 @@ fn greet_records() {
     assert_eq!(res.error, None);
     assert_eq!(res.records(TO_MAIN)[0]["greeting"], "Moin, Ada!");
     assert_eq!(res.records(TO_ERROR)[0]["_error"], "name is empty");
+}
+
+#[test]
+fn init_greet() {
+    let c = Client::start(&hello::plugin());
+    let input = InitInput {
+        input: RecordSchema {
+            fields: vec![Field::new("name", types::STRING)],
+            open: false,
+        },
+        targets: vec![],
+    };
+    let res = c.init("hello.greet", json!({"field": "nom"}), &input).unwrap();
+    assert_eq!(res.problems[0].message, r#"field "nom" is not in the input"#);
+    assert_eq!(res.output.unwrap().fields[1], Field::new("greeting", types::STRING));
 }
 
 #[test]
@@ -127,4 +142,14 @@ links:
     let lines: Vec<&str> = csv.trim_start_matches('\u{feff}').trim().lines().collect();
     assert_eq!(lines.len(), 2001, "{csv}");
     assert_eq!(lines[2000].trim(), "2000,\"Hello, Ada!\"");
+
+    // init: a field that is not in the input is an error of the check.
+    let path = p.dir.join("pipelines").join("greet.pipeline.yaml");
+    let yaml = std::fs::read_to_string(&path)
+        .unwrap()
+        .replacen("field: name", "field: nom", 1);
+    std::fs::write(&path, yaml).unwrap();
+    let (out, code) = p.validate();
+    assert_ne!(code, 0, "{out}");
+    assert!(out.contains(r#"field "nom" is not in the input"#), "{out}");
 }

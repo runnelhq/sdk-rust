@@ -1,11 +1,10 @@
 //! The example plugin of the Rust SDK: the action `hello.greet` returns a greeting, the
-//! transform `hello.greet` adds one to every record. The
-//! program (src/main.rs) serves it; build it into `plugins/hello/bin/` of a project (see
-//! README.md of the SDK).
+//! transform `hello.greet` adds one to every record. The program (src/main.rs) serves it;
+//! build it into `plugins/hello/bin/` of a project (see README.md of the SDK).
 
 use runnel_plugin::{
-    Action, Call, Config, Error, Field, Plugin, Stream, TO_ERROR, TO_MAIN, Transform, Value, error_fields, error_row,
-    field_index, types,
+    Action, Call, Config, Context, Error, Field, InitInput, InitResult, Plugin, Problem, RecordSchema, Stream,
+    TO_ERROR, TO_MAIN, Transform, Value, error_fields, error_row, field_index, types,
 };
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +99,29 @@ fn greet_records(s: &mut Stream, c: GreetFieldConfig) -> Result<(), Error> {
     Ok(())
 }
 
+/// Tells Runnel the fields of the output: the input and the greeting.
+fn init_greet(_ctx: &Context, input: &InitInput, c: GreetFieldConfig) -> InitResult {
+    let c = c.defaults();
+    let mut res = InitResult::default();
+    if !input.input.open && field_index(&input.input.fields, &c.field).is_none() {
+        res.problems.push(Problem::error(
+            "field",
+            format!("field {:?} is not in the input", c.field),
+        ));
+    }
+    if field_index(&input.input.fields, &c.target).is_some() {
+        res.problems
+            .push(Problem::error("target", format!("field {:?} exists already", c.target)));
+    }
+    let mut fields = input.input.fields.clone();
+    fields.push(Field::new(&c.target, types::STRING));
+    res.output = Some(RecordSchema {
+        fields,
+        open: input.input.open,
+    });
+    res
+}
+
 /// The plugin with its actions; main serves it, the tests call it directly.
 pub fn plugin() -> Plugin {
     let mut p = Plugin::new("hello", VERSION);
@@ -116,7 +138,8 @@ pub fn plugin() -> Plugin {
         )
         .example("type: hello.greet\nwith:\n  field: name\n  target: greeting\n")
         .record_errors()
-        .parallel(),
+        .parallel()
+        .init(init_greet),
     );
     p
 }

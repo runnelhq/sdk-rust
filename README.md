@@ -11,8 +11,8 @@ beide SDKs beantworten dieselben Transkripte des Protokolls (`testdata/protocol/
 | | |
 |---|---|
 | Crate | `runnel-plugin` (noch nicht auf crates.io; Einbinden über Git, siehe unten), dazu `runnel-plugin-derive` für `#[derive(Config)]` |
-| Protokoll | Version 1: `initialize`, `describe`, `action.execute`, `connection.test`, Transforms als Strom (`transform.open/batch/end/emit/closed`, `$/ack`), `$/cancelRequest`, `shutdown` |
-| Runnel | Actions und Connection-Typen ab S49c, Transforms ab S50a |
+| Protokoll | Version 1: `initialize`, `describe`, `action.execute`, `connection.test`, Transforms als Strom (`transform.open/batch/end/emit/closed`, `$/ack`), `transform.init`, `transform.detectFields`, `$/cancelRequest`, `shutdown` |
+| Runnel | Actions und Connection-Typen ab S49c, Transforms ab S50a, `init`/`detectFields` ab S50b |
 | Rust | ab 1.87 (Edition 2024) |
 | Lizenz | MIT; Abhängigkeiten im Plugin nur `serde` und `serde_json` (MIT oder Apache-2.0), das Derive-Makro braucht beim Bauen `syn`, `quote` und `proc-macro2` |
 
@@ -201,7 +201,33 @@ p.transform(
   scheitert. Mehrere Ströme (auch `copies`) laufen in einem Prozess nebeneinander, je in einem eigenen Thread.
 - **Feldkopf:** Das SDK schickt `fields` mit jedem `emit` (wie das Go-SDK, wegen Runnel vor runnel#228).
 
-Im Test: `c.run_transform(typ, config, &batches)` (Kredite wie bei Runnel, Ergebnis mit `records(TO_MAIN)`).
+### Schema und „Felder ermitteln“
+
+```rust
+Transform::new("hello.greet", "Greet", "…", greet_records)
+    .init(|ctx, input: &InitInput, c: GreetFieldConfig| {
+        let mut res = InitResult::default();
+        if !input.input.open && field_index(&input.input.fields, &c.field).is_none() {
+            res.problems.push(Problem::error("field", format!("field {:?} is not in the input", c.field)));
+        }
+        let mut fields = input.input.fields.clone();
+        fields.push(Field::new("greeting", types::STRING));
+        res.output = Some(RecordSchema { fields, open: input.input.open });
+        res
+    })
+```
+
+- **`.init(…)`** (optional, `transform.init`) prüft die Konfiguration und nennt die Felder des Ausgangs
+  (`InitResult` mit `output` und `problems` am Pfad in `with`, z. B. `field` oder `fields[2].name`). Runnel ruft es
+  beim Prüfen (`validate`, Editor) und vor dem Lauf auf: ohne Secrets, Connections nur mit Namen, Variablen eventuell
+  noch als `${…}`. Werte, die dann nicht zum Typ passen, bleiben bei ihrer Vorgabe. `init` soll prüfen, nicht
+  verbinden. Ohne `output` ist das Schema hinter dem Transform offen.
+- **`.detect_fields(…)`** (optional, `transform.detectFields`) liest für „Detect fields“ im Editor die ersten Records
+  einer Eingabe (höchstens `limit`, ohne Angabe 1.000) und schlägt Felder mit Typ und Beispielwerten vor
+  (`Detection`); Connections kommen dabei aufgelöst.
+
+Im Test: `c.run_transform(typ, config, &batches)` (Kredite wie bei Runnel, Ergebnis mit `records(TO_MAIN)`),
+`c.init(typ, config, &input)`, `c.detect_fields(typ, config, limit)`.
 
 **Durchsatz** (fünf Felder, vier Kerne): mit Runnel (Beispiel-Plugin, 500.000 Records, ein Feld dazu) etwa
 380.000 Records/s; `make bench` misst den Strom ohne Runnel mit dem Test-Client (etwa 450.000 Records/s).

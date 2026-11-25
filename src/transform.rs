@@ -10,7 +10,7 @@ use serde_json::value::RawValue;
 
 use crate::serve::{RunContext, Server, byte_size, fits, safely};
 use crate::value::{Field, Row, decode_row};
-use crate::{Cancel, Config, ConfigSchema, Error, Logger, MAX_MESSAGE_SIZE, Plugin, code, decode};
+use crate::{Cancel, Config, ConfigSchema, Context, Error, Logger, MAX_MESSAGE_SIZE, Plugin, code, decode};
 
 /// Categories of transforms in the palette of the editor (besides
 /// [`category::EXECUTION`]).
@@ -41,6 +41,117 @@ pub struct Batch {
 
 type RunFn<C> = dyn Fn(&mut Stream, C) -> Result<(), Error> + Send + Sync;
 type StreamFn = dyn Fn(&mut Stream, Option<&RawValue>) -> Result<(), Error> + Send + Sync;
+type InitFn<C> = dyn Fn(&Context, &InitInput, C) -> InitResult + Send + Sync;
+type RawInitFn = dyn Fn(&Context, &InitInput, Option<&RawValue>) -> InitResult + Send + Sync;
+type DetectFn<C> = dyn Fn(&Context, C, usize) -> Result<Detection, Error> + Send + Sync;
+type RawDetectFn = dyn Fn(&Context, Option<&RawValue>, usize) -> Result<Detection, Error> + Send + Sync;
+
+/// Reads null like a missing value: Runnel (Go) sends empty lists as null.
+fn null_as_default<'de, D: serde::Deserializer<'de>, T: Default + Deserialize<'de>>(d: D) -> Result<T, D::Error> {
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
+
+/// Records on a link: the known fields and whether others may occur.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RecordSchema {
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub fields: Vec<Field>,
+    #[serde(
+        default,
+        deserialize_with = "null_as_default",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub open: bool,
+}
+
+/// What `init` learns about the pipeline.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct InitInput {
+    /// The schema of the incoming records; empty and closed for an input.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub input: RecordSchema,
+    /// The ids of the transforms that data links lead to.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub targets: Vec<String>,
+}
+
+/// The answer of `init`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct InitResult {
+    /// The schema of the outgoing records; None means open (unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<RecordSchema>,
+    /// Mistakes of the configuration; the editor shows them at their path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<Problem>,
+}
+
+/// A mistake of the configuration at a path in `with:`, e.g. `field` or
+/// `fields[2].name`; a warning does not stop the run.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Problem {
+    pub path: String,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub warning: bool,
+}
+
+impl Problem {
+    /// An error at a path.
+    pub fn error(path: &str, message: impl Into<String>) -> Problem {
+        Problem {
+            path: path.to_string(),
+            message: message.into(),
+            warning: false,
+        }
+    }
+
+    /// A warning at a path.
+    pub fn warning(path: &str, message: impl Into<String>) -> Problem {
+        Problem {
+            path: path.to_string(),
+            message: message.into(),
+            warning: true,
+        }
+    }
+}
+
+/// What `detect_fields` found: facts about the source, the number of records read,
+/// whether that was all, and the proposed fields.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Detection {
+    #[serde(default)]
+    pub source: Vec<Fact>,
+    #[serde(default)]
+    pub rows: usize,
+    #[serde(default)]
+    pub complete: bool,
+    #[serde(default)]
+    pub fields: Vec<DetectedField>,
+}
+
+/// A line of the description of the source, e.g. Filter: (objectClass=user).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Fact {
+    pub name: String,
+    pub value: String,
+}
+
+/// A proposed field with its first values as text.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DetectedField {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub format: String,
+    #[serde(default)]
+    pub values: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub note: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub warning: bool,
+}
 
 /// A transform of the plugin with its configuration type C. Create it with
 /// [`Transform::new`] and add it with [`Plugin::transform`]. The same type may also be an
@@ -54,6 +165,8 @@ pub struct Transform<C> {
     record_errors: bool,
     parallel: bool,
     run: Arc<RunFn<C>>,
+    init: Option<Arc<InitFn<C>>>,
+    detect: Option<Arc<DetectFn<C>>>,
 }
 
 impl<C: Config> Transform<C> {
@@ -75,6 +188,8 @@ impl<C: Config> Transform<C> {
             record_errors: false,
             parallel: false,
             run: Arc::new(run),
+            init: None,
+            detect: None,
         }
     }
 
@@ -104,6 +219,30 @@ impl<C: Config> Transform<C> {
         self.parallel = true;
         self
     }
+
+    /// Optional: checks the configuration and tells the fields of the output
+    /// (`transform.init`), when Runnel checks the pipeline and before the run. Fields with
+    /// secrets are empty, connections only have their name and variables may still be
+    /// `${…}` – `init` checks, it must not connect. Values that do not fit the struct are
+    /// left at their default.
+    pub fn init<F>(mut self, init: F) -> Self
+    where
+        F: Fn(&Context, &InitInput, C) -> InitResult + Send + Sync + 'static,
+    {
+        self.init = Some(Arc::new(init));
+        self
+    }
+
+    /// Optional: reads the first records of an input for "Detect fields" in the editor
+    /// (`transform.detectFields`), at most `limit`, within a minute. Connections are
+    /// resolved as in a run.
+    pub fn detect_fields<F>(mut self, detect: F) -> Self
+    where
+        F: Fn(&Context, C, usize) -> Result<Detection, Error> + Send + Sync + 'static,
+    {
+        self.detect = Some(Arc::new(detect));
+        self
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -123,12 +262,18 @@ pub(crate) struct TransformDescriptor {
     record_errors: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     parallel: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    init: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    detect_fields: bool,
 }
 
 #[derive(Clone)]
 pub(crate) struct TransformEntry {
     pub(crate) descriptor: TransformDescriptor,
     run: Arc<StreamFn>,
+    init: Option<Arc<RawInitFn>>,
+    detect: Option<Arc<RawDetectFn>>,
 }
 
 impl Plugin {
@@ -154,6 +299,20 @@ impl Plugin {
         let schema = C::schema().unwrap_or_else(|e| panic!("runnel: transform {:?}: {e}", t.type_));
         let s = schema.clone();
         let run = t.run.clone();
+        let init = t.init.map(|f| -> Arc<RawInitFn> {
+            let s = schema.clone();
+            Arc::new(move |ctx, input, raw| match decode::decode_lenient::<C>(raw, &s) {
+                Ok(c) => f(ctx, input, c),
+                Err(e) => InitResult {
+                    output: None,
+                    problems: vec![Problem::error("", e.to_string())],
+                },
+            })
+        });
+        let detect = t.detect.map(|f| -> Arc<RawDetectFn> {
+            let s = schema.clone();
+            Arc::new(move |ctx, raw, limit| f(ctx, decode::decode(raw, &s)?, limit))
+        });
         self.transforms.push(TransformEntry {
             descriptor: TransformDescriptor {
                 type_: t.type_,
@@ -165,7 +324,11 @@ impl Plugin {
                 example: t.example,
                 record_errors: t.record_errors,
                 parallel: t.parallel,
+                init: init.is_some(),
+                detect_fields: detect.is_some(),
             },
+            init,
+            detect,
             run: Arc::new(move |stream, raw| {
                 let c: C = decode::decode(raw, &s)?;
                 run(stream, c)
@@ -243,7 +406,7 @@ pub struct Stream {
 struct BatchParams {
     #[serde(default)]
     fields: Option<Vec<Field>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     rows: Vec<Vec<Json>>,
 }
 
@@ -389,9 +552,82 @@ impl Server {
     pub(crate) fn request(self: &Arc<Self>, method: &str, id: &RawValue, params: Option<&RawValue>) -> bool {
         match method {
             "transform.open" => self.open_stream(id, params),
+            "transform.init" => self.init_transform(id, params),
+            "transform.detectFields" => self.detect_fields(id, params),
             _ => return false,
         }
         true
+    }
+
+    fn init_transform(self: &Arc<Self>, id: &RawValue, params: Option<&RawValue>) {
+        #[derive(Deserialize)]
+        struct P {
+            #[serde(rename = "type", default)]
+            type_: String,
+            #[serde(default)]
+            config: Option<Box<RawValue>>,
+            #[serde(flatten)]
+            input: InitInput,
+        }
+        let Some(p) = params.and_then(|p| serde_json::from_str::<P>(p.get()).ok()) else {
+            return self.fail(
+                Some(id),
+                code::INVALID_PARAMS,
+                "invalid parameters of transform.init".into(),
+            );
+        };
+        let init = self
+            .p
+            .transforms
+            .iter()
+            .find(|t| t.descriptor.type_ == p.type_)
+            .and_then(|t| t.init.clone());
+        let Some(init) = init else {
+            return self.fail(
+                Some(id),
+                code::METHOD_NOT_FOUND,
+                format!("transform {:?} has no init", p.type_),
+            );
+        };
+        self.run(id, p.type_.clone(), move |ctx| {
+            Ok(serde_json::to_value(init(ctx, &p.input, p.config.as_deref()))?)
+        });
+    }
+
+    fn detect_fields(self: &Arc<Self>, id: &RawValue, params: Option<&RawValue>) {
+        #[derive(Deserialize)]
+        struct P {
+            #[serde(rename = "type", default)]
+            type_: String,
+            #[serde(default)]
+            config: Option<Box<RawValue>>,
+            #[serde(default)]
+            limit: i64,
+        }
+        let Some(p) = params.and_then(|p| serde_json::from_str::<P>(p.get()).ok()) else {
+            return self.fail(
+                Some(id),
+                code::INVALID_PARAMS,
+                "invalid parameters of transform.detectFields".into(),
+            );
+        };
+        let detect = self
+            .p
+            .transforms
+            .iter()
+            .find(|t| t.descriptor.type_ == p.type_)
+            .and_then(|t| t.detect.clone());
+        let Some(detect) = detect else {
+            return self.fail(
+                Some(id),
+                code::METHOD_NOT_FOUND,
+                format!("transform {:?} cannot detect fields", p.type_),
+            );
+        };
+        let limit = if p.limit <= 0 { 1000 } else { p.limit as usize };
+        self.run(id, p.type_.clone(), move |ctx| {
+            Ok(serde_json::to_value(detect(ctx, p.config.as_deref(), limit)?)?)
+        });
     }
 
     fn open_stream(self: &Arc<Self>, id: &RawValue, params: Option<&RawValue>) {
