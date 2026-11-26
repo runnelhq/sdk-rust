@@ -35,6 +35,7 @@
 mod cancel;
 mod decode;
 mod log;
+mod reference;
 pub mod schema;
 mod serve;
 pub mod testing;
@@ -49,6 +50,7 @@ use serde_json::Value as Json;
 
 pub use cancel::Cancel;
 pub use log::Logger;
+pub use reference::{OUTPUT_TYPES, OutputField, RECORD_OUTPUT_TYPES, Reference};
 pub use schema::ConfigSchema;
 pub use serve::MAX_MESSAGE_SIZE;
 pub use transform::{
@@ -265,6 +267,7 @@ pub struct Action<C> {
     label: String,
     description: String,
     example: String,
+    reference: Reference,
     run: Arc<RunFn<C>>,
 }
 
@@ -286,6 +289,7 @@ impl<C: Config> Action<C> {
             label: label.to_string(),
             description: description.to_string(),
             example: String::new(),
+            reference: Reference::default(),
             run: Arc::new(move |call, c| {
                 let out = run(call, c)?;
                 serde_json::to_value(out).map_err(|e| format!("the plugin cannot encode its result: {e}").into())
@@ -304,6 +308,12 @@ impl<C: Config> Action<C> {
     /// Optional YAML of the action for the help in the editor.
     pub fn example(mut self, yaml: &str) -> Self {
         self.example = yaml.to_string();
+        self
+    }
+
+    /// Optional: what the action returns, when it fails and its limits (see [`Reference`]).
+    pub fn reference(mut self, reference: Reference) -> Self {
+        self.reference = reference;
         self
     }
 }
@@ -344,15 +354,17 @@ impl<C: Config> ConnectionType<C> {
 #[derive(Serialize, Clone)]
 pub(crate) struct ActionDescriptor {
     #[serde(rename = "type")]
-    type_: String,
+    pub(crate) type_: String,
     kind: &'static str,
     #[serde(skip_serializing_if = "String::is_empty")]
     category: String,
     label: String,
     description: String,
-    schema: ConfigSchema,
+    pub(crate) schema: ConfigSchema,
     #[serde(skip_serializing_if = "String::is_empty")]
     example: String,
+    #[serde(flatten)]
+    pub(crate) reference: Reference,
 }
 
 #[derive(Serialize, Clone)]
@@ -491,6 +503,7 @@ impl Plugin {
             "runnel: action {:?} needs a label and a description",
             a.type_
         );
+        reference::check_definition("action", &a.type_, &a.reference);
         let schema = C::schema().unwrap_or_else(|e| panic!("runnel: action {:?}: {e}", a.type_));
         let s = schema.clone();
         let run = a.run.clone();
@@ -503,6 +516,7 @@ impl Plugin {
                 description: a.description,
                 schema,
                 example: a.example,
+                reference: a.reference,
             },
             run: Arc::new(move |call, raw| {
                 let c: C = decode::decode(raw, &s)?;

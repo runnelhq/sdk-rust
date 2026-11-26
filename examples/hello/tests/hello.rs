@@ -48,6 +48,11 @@ fn init_greet() {
 }
 
 #[test]
+fn references() {
+    runnel_plugin::testing::check_references(&hello::plugin()).unwrap();
+}
+
+#[test]
 fn version_matches_plugin_yaml() {
     let yaml = include_str!("../plugin.yaml");
     assert!(
@@ -143,6 +148,20 @@ links:
     assert_eq!(lines.len(), 2001, "{csv}");
     assert_eq!(lines[2000].trim(), "2000,\"Hello, Ada!\"");
 
+    // The references reach the catalog of the editor (GET /api/v1/catalog of runnel serve).
+    let catalog = catalog_of(&p);
+    let all: Vec<&serde_json::Value> = ["actions", "transforms"]
+        .iter()
+        .flat_map(|k| catalog[k].as_array().unwrap())
+        .filter(|d| d["type"] == "hello.greet")
+        .collect();
+    assert_eq!(all.len(), 2, "{catalog}");
+    assert!(
+        all.iter().all(|d| d["errors"].is_string() && d["outputs"].is_array()),
+        "{all:?}"
+    );
+    assert!(all.iter().any(|d| d["records"].is_string()), "{all:?}");
+
     // init: a field that is not in the input is an error of the check.
     let path = p.dir.join("pipelines").join("greet.pipeline.yaml");
     let yaml = std::fs::read_to_string(&path)
@@ -152,4 +171,45 @@ links:
     let (out, code) = p.validate();
     assert_ne!(code, 0, "{out}");
     assert!(out.contains(r#"field "nom" is not in the input"#), "{out}");
+}
+
+/// Starts runnel serve for the project and returns its catalog.
+fn catalog_of(p: &Project) -> serde_json::Value {
+    use std::io::{Read, Write};
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let mut server = p
+        .command(&[
+            "serve",
+            &p.dir.to_string_lossy(),
+            "--port",
+            &port.to_string(),
+            "--triggers",
+            "",
+        ])
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let body = loop {
+        let got = std::net::TcpStream::connect(("127.0.0.1", port))
+            .ok()
+            .and_then(|mut c| {
+                write!(c, "GET /api/v1/catalog HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n").ok()?;
+                let mut text = String::new();
+                c.read_to_string(&mut text).ok()?;
+                text.starts_with("HTTP/1.0 200")
+                    .then(|| text.split_once("\r\n\r\n").map(|(_, b)| b.to_string()))?
+            });
+        if let Some(b) = got {
+            break b;
+        }
+        assert!(std::time::Instant::now() < deadline, "runnel serve did not answer");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    let _ = server.kill();
+    let _ = server.wait();
+    serde_json::from_str(&body).unwrap()
 }

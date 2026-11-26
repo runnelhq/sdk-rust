@@ -66,18 +66,26 @@ impl Project {
         std::fs::write(&path, content).expect("write file");
     }
 
-    /// Runs the runnel program with args and returns its output (stdout and stderr) and
-    /// exit code.
-    pub fn runnel(&self, args: &[&str]) -> (String, i32) {
+    /// The runnel program with args, in the project folder and with the trusts and state
+    /// of the temporary folder, e.g. to start `runnel serve` in the background.
+    pub fn command(&self, args: &[&str]) -> Command {
         let config = self.root.join("config");
-        let out = Command::new(&self.runnel)
-            .args(args)
+        let mut cmd = Command::new(&self.runnel);
+        cmd.args(args)
             .current_dir(&self.dir)
             .env("XDG_CONFIG_HOME", &config) // trusts on Linux
             .env("APPDATA", &config) // trusts on Windows
             .env("HOME", &config) // trusts on macOS
             .env("LOCALAPPDATA", self.root.join("local"))
-            .env("XDG_STATE_HOME", self.root.join("state"))
+            .env("XDG_STATE_HOME", self.root.join("state"));
+        cmd
+    }
+
+    /// Runs the runnel program with args and returns its output (stdout and stderr) and
+    /// exit code.
+    pub fn runnel(&self, args: &[&str]) -> (String, i32) {
+        let out = self
+            .command(args)
             .output()
             .unwrap_or_else(|e| panic!("runnel {args:?}: {e}"));
         let mut text = String::from_utf8_lossy(&out.stdout).to_string();

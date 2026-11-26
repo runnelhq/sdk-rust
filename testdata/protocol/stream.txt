@@ -1,5 +1,5 @@
 # A transform as stream: open, batches (fields only in the first), credits, targets,
-# error link, end; then init and detectFields.
+# error link, end; then init (also with null for empty lists) and detectFields.
 → {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}
 ← {"id":1,"jsonrpc":"2.0","result":{"concurrency":4,"encoding":"json","name":"golden","protocolVersion":1,"version":"1.0.0"}}
 → {"jsonrpc":"2.0","id":2,"method":"transform.open","params":{"stream":7,"type":"golden.upper","config":{"field":"name","to":"rejected"},"context":{"runId":"01RUN","transformId":"up","projectDir":"."},"emitWindow":4}}
@@ -17,6 +17,8 @@
 ← {"jsonrpc":"2.0","method":"transform.closed","params":{"stream":7}}
 → {"jsonrpc":"2.0","id":3,"method":"transform.init","params":{"type":"golden.upper","config":{"field":"nom"},"input":{"fields":[{"name":"name","type":"string"}]},"targets":[]}}
 ← {"id":3,"jsonrpc":"2.0","result":{"output":{"fields":[{"name":"name","type":"string"}]},"problems":[{"path":"field","message":"field \"nom\" is not in the input"}]}}
+→ {"jsonrpc":"2.0","id":30,"method":"transform.init","params":{"type":"golden.upper","config":{"field":"name"},"input":{"fields":null},"targets":null}}
+← {"id":30,"jsonrpc":"2.0","result":{"output":{"fields":[]},"problems":[{"path":"field","message":"field \"name\" is not in the input"}]}}
 → {"jsonrpc":"2.0","id":4,"method":"transform.detectFields","params":{"type":"golden.upper","config":{"field":"name"},"limit":10}}
 ← {"id":4,"jsonrpc":"2.0","result":{"source":[],"rows":1,"complete":true,"fields":[{"name":"name","type":"string","values":["anna"]}]}}
 → {"jsonrpc":"2.0","id":5,"method":"shutdown","params":{}}

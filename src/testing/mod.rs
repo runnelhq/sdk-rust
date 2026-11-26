@@ -300,6 +300,41 @@ impl Drop for Client {
     }
 }
 
+/// Checks the references of all actions and transforms of a plugin, as Runnel checks those
+/// of its built-in types (ADR 0014, E15b): `errors` for every type, `records` for every
+/// transform, texts as sentences with a period, output types that exist, output names that
+/// are paths of the output or name fields of the configuration (`<field>`). Plugins call it
+/// in a test if they want to; the protocol does not require references.
+///
+/// ```
+/// # let p = runnel_plugin::Plugin::new("demo", "1.0.0");
+/// runnel_plugin::testing::check_references(&p).unwrap();
+/// ```
+pub fn check_references(p: &Plugin) -> Result<(), String> {
+    let mut problems = Vec::new();
+    for a in &p.actions {
+        for m in check_reference("action", &a.descriptor.reference, &a.descriptor.schema) {
+            problems.push(format!("action {}: {m}", a.descriptor.type_));
+        }
+    }
+    for t in &p.transforms {
+        for m in check_reference("transform", &t.descriptor.reference, &t.descriptor.schema) {
+            problems.push(format!("transform {}: {m}", t.descriptor.type_));
+        }
+    }
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems.join("\n"))
+    }
+}
+
+/// Checks one reference of an action (`kind` "action") or transform ("transform") against
+/// the schema of its configuration; see [`check_references`]. Returns the mistakes.
+pub fn check_reference(kind: &str, reference: &crate::Reference, schema: &crate::ConfigSchema) -> Vec<String> {
+    crate::reference::check(kind, reference, schema)
+}
+
 fn execute_params(type_: &str, config: Json) -> Json {
     json!({"type": type_, "config": config, "context": {"runId": "01TESTRUN", "actionId": "test", "projectDir": "."}})
 }

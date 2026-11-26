@@ -1,5 +1,6 @@
 # Answers to mistakes of the host: before initialize, invalid JSON, unknown method,
-# unknown type, invalid parameters, a notification without known method.
+# unknown type, invalid parameters, a notification without known method, ids that are
+# neither a whole number (int64) nor a text (answered with id null), ids as text.
 → {"jsonrpc":"2.0","id":1,"method":"describe","params":{}}
 ← {"error":{"code":-32002,"message":"initialize first"},"id":1,"jsonrpc":"2.0"}
 → {"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":1}}
@@ -20,5 +21,21 @@
 → {"jsonrpc":"2.0","id":8,"method":"connection.test","params":{"type":"golden.none","connection":{}}}
 ← {"error":{"code":-32601,"message":"connection type \"golden.none\" has no test"},"id":8,"jsonrpc":"2.0"}
 → {"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":99}}
+→ {"jsonrpc":"2.0","id":1e999,"method":"describe","params":{}}
+← {"error":{"code":-32600,"message":"invalid id: an id is a whole number (int64) or a text"},"id":null,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":1.5,"method":"describe","params":{}}
+← {"error":{"code":-32600,"message":"invalid id: an id is a whole number (int64) or a text"},"id":null,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":9223372036854775808,"method":"describe","params":{}}
+← {"error":{"code":-32600,"message":"invalid id: an id is a whole number (int64) or a text"},"id":null,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":{"n":1},"method":"describe","params":{}}
+← {"error":{"code":-32600,"message":"invalid id: an id is a whole number (int64) or a text"},"id":null,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":[1],"method":"describe","params":{}}
+← {"error":{"code":-32600,"message":"invalid id: an id is a whole number (int64) or a text"},"id":null,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":true,"method":"describe","params":{}}
+← {"error":{"code":-32600,"message":"invalid id: an id is a whole number (int64) or a text"},"id":null,"jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":"req-\u0041","method":"golden.unknown","params":{}}
+← {"error":{"code":-32601,"message":"method \"golden.unknown\" not found"},"id":"req-A","jsonrpc":"2.0"}
+→ {"jsonrpc":"2.0","id":-9223372036854775808,"method":"golden.unknown","params":{}}
+← {"error":{"code":-32601,"message":"method \"golden.unknown\" not found"},"id":-9223372036854775808,"jsonrpc":"2.0"}
 → {"jsonrpc":"2.0","id":9,"method":"shutdown","params":{}}
 ← {"id":9,"jsonrpc":"2.0","result":null}

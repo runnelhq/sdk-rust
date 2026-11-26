@@ -263,9 +263,14 @@ impl Server {
             Err(_) => return self.fail(None, code::PARSE_ERROR, "invalid JSON".into()),
         };
         let id = m.id.filter(|id| id.get() != "null");
-        // Ids are numbers or texts (JSON-RPC); others could not be echoed in valid JSON.
-        if id.is_some_and(|id| !serde_json::from_str::<Json>(id.get()).is_ok_and(|v| v.is_number() || v.is_string())) {
-            return self.fail(None, code::INVALID_REQUEST, "invalid id".into());
+        // Ids are whole numbers (int64) or texts (ADR 0019, Nachtrag 2026-11-26); others could
+        // not always be echoed in valid JSON.
+        if id.is_some_and(|id| !serde_json::from_str::<Json>(id.get()).is_ok_and(|v| v.is_i64() || v.is_string())) {
+            return self.fail(
+                None,
+                code::INVALID_REQUEST,
+                "invalid id: an id is a whole number (int64) or a text".into(),
+            );
         }
         let Some(method) = m.method.filter(|m| !m.is_empty()) else {
             if id.is_none() {

@@ -21,7 +21,7 @@ beide SDKs beantworten dieselben Transkripte des Protokolls (`testdata/protocol/
 ```toml
 # Cargo.toml
 [dependencies]
-runnel-plugin = { git = "https://github.com/runnelhq/sdk-rust", tag = "v0.1.0" }
+runnel-plugin = { git = "https://github.com/runnelhq/sdk-rust", tag = "v0.2.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
@@ -115,6 +115,34 @@ nicht zum Typ, `only` ohne Geschwisterfeld) sind Compile-Fehler oder `panic` bei
   kommt als Text an. Passt ein Wert nicht, scheitert die Action mit einer Meldung wie
   `field "times": expected a whole number, got string` – ohne Rust-Typnamen.
 - Ohne Felder: `NoConfig`.
+
+## Referenz: Ergebnis, Fehler und Grenzen
+
+Wie die eingebauten Bausteine (ADR 0014 von Runnel, E15b) kann ein Baustein beschreiben, was er liefert, wann er
+scheitert und welche Grenzen gelten. Runnel zeigt das im Katalog des Editors; alles ist optional.
+
+```rust
+p.action(
+    Action::new("iban.validate", "Validate IBAN", "Checks an IBAN", validate).reference(
+        Reference::new()
+            .output(OutputField::new("output.valid", "boolean", "Whether the IBAN is valid"))
+            .output(OutputField::new("output.country", "string", "Country code of the IBAN"))
+            .errors("Fails when iban is empty.")
+            .limit("An IBAN has at most 34 characters."),
+    ),
+);
+```
+
+| Teil | Inhalt |
+|---|---|
+| `output(…)` | Actions: Teile von `result.output` mit Pfad (`output`, `output.valid`, `output[].dn`) und Typ aus `OUTPUT_TYPES`. Transforms: Felder, die sie setzen, mit Typ aus `RECORD_OUTPUT_TYPES` (`string`, `int`, … oder `any`); ein Name aus der Konfiguration als `<feld>`, z. B. `<target>` oder `<fields[].name>` |
+| `records(…)` | nur Transforms: welche Datensätze sie über welche Links weitergeben |
+| `errors(…)` | wann der Baustein scheitert, bei Transforms was auf den Fehler-Link geht |
+| `limit(…)` | Grenzen für Größe, Anzahl und Zeit mit Standardwerten |
+
+Texte englisch; `records`, `errors` und `limits` als Sätze mit Punkt, die Beschreibung einer Ausgabe ohne Punkt.
+`testing::check_references(&plugin())` prüft das wie die Vertragstests von Runnel: `errors` für jeden Baustein,
+`records` für jeden Transform, Typen, Pfade und Felder in `<…>`. Der Aufruf im Test ist freiwillig.
 
 ## Connection-Typen
 
@@ -244,7 +272,7 @@ Im Test: `c.run_transform(typ, config, &batches)` (Kredite wie bei Runnel, Ergeb
   auf. Das SDK antwortet mit `-32800`. Endet stdin, werden alle laufenden Anfragen abgebrochen.
 - **Fehler:** Ein `Err` der Action wird zur Meldung (`-32000`); ein `panic` ebenso – das Plugin läuft weiter, die
   Meldung mit Backtrace steht in einer Zeile im Log. Anfragen vor `initialize`: `-32002`, unbekannte Methoden:
-  `-32601`, ungültiges JSON: `-32700`, ungültige ID: `-32600`. Eine Antwort über 16 MiB wird zur Fehlermeldung der
+  `-32601`, ungültiges JSON: `-32700`, ungültige ID (keine ganze Zahl im Bereich von int64 und kein Text): `-32600`. Eine Antwort über 16 MiB wird zur Fehlermeldung der
   Action, statt das Plugin zu beenden; eingehende Nachrichten über 16 MiB beenden es.
 - **Log:** `call.log.debug/info/warn/error(…)` schreibt Zeilen mit Stufe auf stderr; Runnel zeigt sie im Log des
   Laufs. Mehrzeilige Meldungen werden eine Zeile (` | `).

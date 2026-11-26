@@ -3,8 +3,8 @@
 //! build it into `plugins/hello/bin/` of a project (see README.md of the SDK).
 
 use runnel_plugin::{
-    Action, Call, Config, Context, Error, Field, InitInput, InitResult, Plugin, Problem, RecordSchema, Stream,
-    TO_ERROR, TO_MAIN, Transform, Value, error_fields, error_row, field_index, types,
+    Action, Call, Config, Context, Error, Field, InitInput, InitResult, OutputField, Plugin, Problem, RecordSchema,
+    Reference, Stream, TO_ERROR, TO_MAIN, Transform, Value, error_fields, error_row, field_index, types,
 };
 use serde::{Deserialize, Serialize};
 
@@ -127,7 +127,21 @@ pub fn plugin() -> Plugin {
     let mut p = Plugin::new("hello", VERSION);
     p.action(
         Action::new("hello.greet", "Greet", "Returns a greeting for a name", greet)
-            .example("type: hello.greet\nwith:\n  name: World\n"),
+            .example("type: hello.greet\nwith:\n  name: World\n")
+            .reference(
+                Reference::new()
+                    .output(OutputField::new(
+                        "output.message",
+                        "string",
+                        "The greeting, e.g. Hello, World!",
+                    ))
+                    .output(OutputField::new(
+                        "output.length",
+                        "integer",
+                        "Number of characters of the greeting",
+                    ))
+                    .errors("Fails when name is empty."),
+            ),
     );
     p.transform(
         Transform::new(
@@ -139,7 +153,15 @@ pub fn plugin() -> Plugin {
         .example("type: hello.greet\nwith:\n  field: name\n  target: greeting\n")
         .record_errors()
         .parallel()
-        .init(init_greet),
+        .init(init_greet)
+        .reference(
+            Reference::new()
+                .output(OutputField::new("<target>", "string", "The greeting for the name in field"))
+                .records("Passes every record with a name on over the data links, with the greeting added.")
+                .errors(
+                    "Records whose field is empty go to the error link with _error and _errorField; without error link the pipeline stops. Fails when field is not in the records.",
+                ),
+        ),
     );
     p
 }

@@ -1,6 +1,6 @@
 [package]
 name = "runnel-plugin-derive"
-version = "0.1.0"
+version = "0.2.0"
 description = "Derive macro Config of runnel-plugin: JSON Schema of a configuration from a Rust struct"
 edition.workspace = true
 rust-version.workspace = true
