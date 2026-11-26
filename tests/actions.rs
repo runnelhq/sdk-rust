@@ -287,7 +287,7 @@ fn protocol_rules() {
     assert_eq!(answers[4]["error"]["code"], code::INVALID_REQUEST);
     assert_eq!(
         answers[5]["error"],
-        json!({"code": code::INVALID_REQUEST, "message": "invalid id"})
+        json!({"code": code::INVALID_REQUEST, "message": "invalid id: an id is a whole number (int64) or a text"})
     );
     assert_eq!(answers[5]["id"], Json::Null);
     assert_eq!(answers[6], json!({"jsonrpc": "2.0", "id": 4, "result": null}));

@@ -4,8 +4,8 @@
 #![allow(dead_code)]
 
 use runnel_plugin::{
-    Action, Config, ConnectionInfo, ConnectionType, DetectedField, Detection, InitResult, Plugin, Problem, TO_ERROR,
-    TO_MAIN, TestResult, Transform, Value, error_fields, error_row, field_index,
+    Action, Config, ConnectionInfo, ConnectionType, DetectedField, Detection, InitResult, OutputField, Plugin, Problem,
+    Reference, TO_ERROR, TO_MAIN, TestResult, Transform, Value, error_fields, error_row, field_index,
 };
 use serde::Deserialize;
 
@@ -62,7 +62,18 @@ pub fn golden() -> Plugin {
                 "run": call.run_id,
             }))
         })
-        .example("type: golden.echo\nwith:\n  text: hello\n"),
+        .example("type: golden.echo\nwith:\n  text: hello\n")
+        .reference(
+            Reference::new()
+                .output(OutputField::new("output.text", "string", "The text, times times"))
+                .output(OutputField::new(
+                    "output.host",
+                    "string",
+                    "Host of the connection server",
+                ))
+                .errors("Fails when text is fail.")
+                .limit("times repeats the text at most 1000 times."),
+        ),
     );
     p.transform(
         Transform::new(
@@ -93,6 +104,12 @@ pub fn golden() -> Plugin {
         )
         .record_errors()
         .parallel()
+        .reference(
+            Reference::new()
+                .output(OutputField::new("<field>", "string", "The value in capitals"))
+                .records("Passes every record to the data links; records with the value route go to the target to.")
+                .errors("Records with the value bad go to the error link."),
+        )
         .init(|_ctx, input, c: GoldenFields| {
             let mut res = InitResult {
                 output: Some(input.input.clone()),

@@ -164,6 +164,7 @@ pub struct Transform<C> {
     example: String,
     record_errors: bool,
     parallel: bool,
+    reference: crate::Reference,
     run: Arc<RunFn<C>>,
     init: Option<Arc<InitFn<C>>>,
     detect: Option<Arc<DetectFn<C>>>,
@@ -187,6 +188,7 @@ impl<C: Config> Transform<C> {
             example: String::new(),
             record_errors: false,
             parallel: false,
+            reference: crate::Reference::default(),
             run: Arc::new(run),
             init: None,
             detect: None,
@@ -211,6 +213,13 @@ impl<C: Config> Transform<C> {
     /// The transform may have an error link (`emit` to [`TO_ERROR`]).
     pub fn record_errors(mut self) -> Self {
         self.record_errors = true;
+        self
+    }
+
+    /// Optional: the fields the transform sets, which records it passes on, when it fails
+    /// and its limits (see [`crate::Reference`]).
+    pub fn reference(mut self, reference: crate::Reference) -> Self {
+        self.reference = reference;
         self
     }
 
@@ -255,7 +264,7 @@ pub(crate) struct TransformDescriptor {
     category: String,
     label: String,
     description: String,
-    schema: ConfigSchema,
+    pub(crate) schema: ConfigSchema,
     #[serde(skip_serializing_if = "String::is_empty")]
     example: String,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -266,6 +275,8 @@ pub(crate) struct TransformDescriptor {
     init: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     detect_fields: bool,
+    #[serde(flatten)]
+    pub(crate) reference: crate::Reference,
 }
 
 #[derive(Clone)]
@@ -296,6 +307,7 @@ impl Plugin {
             "runnel: transform {:?} needs a label and a description",
             t.type_
         );
+        crate::reference::check_definition("transform", &t.type_, &t.reference);
         let schema = C::schema().unwrap_or_else(|e| panic!("runnel: transform {:?}: {e}", t.type_));
         let s = schema.clone();
         let run = t.run.clone();
@@ -326,6 +338,7 @@ impl Plugin {
                 parallel: t.parallel,
                 init: init.is_some(),
                 detect_fields: detect.is_some(),
+                reference: t.reference,
             },
             init,
             detect,
